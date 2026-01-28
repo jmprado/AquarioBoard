@@ -1,3 +1,8 @@
+// WiFi and HTTP libraries for ESP8266
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClient.h>
+
 // RTC DS3231 Lib
 #include <DS3231.h>
 DS3231 rtc;
@@ -29,11 +34,22 @@ const char labelTemp[] = "Temp:";
 const char labelPh[] = "pH:";
 const char degreeSymbol[] = "\xB0";
 
+// WiFi configuration
+const char *ssid = "Pereira Prado";                              // Replace with your WiFi SSID
+const char *password = "jupeva98";                               // Replace with your WiFi password
+const char *apiEndpoint = "http://YOUR_SERVER_IP/getAquaValues"; // Replace with your API endpoint
+
+// API authentication
+const char *apiUsername = "YOUR_API_USERNAME"; // Replace with your API username
+const char *apiPassword = "YOUR_API_PASSWORD"; // Replace with your API password
+
 // Timing settings
 const unsigned long SENSOR_UPDATE_INTERVAL = 10000; // 10 seconds for sensor readings
+const unsigned long API_UPDATE_INTERVAL = 30000;    // 30 seconds for API updates
 const unsigned long BUBBLE_UPDATE_INTERVAL = 100;   // 100ms for bubble animation
 
 unsigned long lastSensorUpdate = 0;
+unsigned long lastApiUpdate = 0;
 unsigned long lastBubbleUpdate = 0;
 
 // Bubble animation settings
@@ -88,13 +104,17 @@ void drawFish(void);
 void drawPlants(void);
 void u8g2_prepare(void);
 void handleButton(void);
+void connectWiFi(void);
+void sendDataToAPI(float temperature, float phValue);
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial)
   {
   }
+
+  Serial.println(F("\n=== Aquarium Board Starting ==="));
 
   // Initialize hardware first
   pinMode(relay_1_bus, OUTPUT);
@@ -104,11 +124,22 @@ void setup()
   digitalWrite(relay_1_bus, LOW);
   digitalWrite(relay_2_bus, LOW);
 
-  randomSeed(analogRead(A1));
+  randomSeed(ESP.getCycleCount());
 
   sensors.begin();
+  Serial.print(F("Temperature sensors found: "));
+  Serial.println(sensors.getDeviceCount());
+
   u8g2.begin();
+  Serial.println(F("LCD initialized"));
+  yield(); // Feed watchdog after SPI communication
+
   rtc.begin();
+
+  // Connect to WiFi
+  connectWiFi();
+
+  yield(); // Feed watchdog after initialization
 
   // Set RTC time - UNCOMMENT AND MODIFY THIS LINE TO SET THE CORRECT TIME
   // rtc.setDateTime(__DATE__, __TIME__);
@@ -135,9 +166,10 @@ void loop()
 
   // Get current time and control relay_1 (10:00 AM to 6:00 PM)
   rtcDateTime = rtc.getDateTime();
-  
+  yield(); // Feed watchdog after I2C communication
+
   int currentTime = rtcDateTime.hour * 100 + rtcDateTime.minute;
-  
+
   // Determine desired relay state
   bool desiredRelay1State;
   if (relay1Override)
@@ -157,13 +189,13 @@ void loop()
       desiredRelay1State = LOW;
     }
   }
-  
+
   // Only update relay if state changed
   if (desiredRelay1State != lastRelay1State)
   {
     digitalWrite(relay_1_bus, desiredRelay1State);
     lastRelay1State = desiredRelay1State;
-    
+
     Serial.print(F("Relay 1: "));
     Serial.print(desiredRelay1State == HIGH ? F("ON") : F("OFF"));
     Serial.print(F(" ["));
@@ -195,6 +227,23 @@ void loop()
     needsRedraw = true;
   }
 
+  // Send data to API every 30 seconds
+  if (currentMillis - lastApiUpdate >= API_UPDATE_INTERVAL)
+  {
+    lastApiUpdate = currentMillis;
+
+    // Check WiFi connection
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      Serial.println(F("WiFi disconnected, reconnecting..."));
+      connectWiFi();
+    }
+    else
+    {
+      sendDataToAPI(temp1, ph);
+    }
+  }
+
   // Update animations every 100ms
   if (currentMillis - lastBubbleUpdate >= BUBBLE_UPDATE_INTERVAL)
   {
@@ -216,6 +265,8 @@ void loop()
 
     // Draw everything using page mode
     u8g2_prepare();
+    yield(); // Feed watchdog before display operations
+
     u8g2.firstPage();
     do
     {
@@ -235,7 +286,11 @@ void loop()
       {
         u8g2.drawStr(90, 0, "[OVR]");
       }
+
+      yield(); // Feed watchdog during page rendering
     } while (u8g2.nextPage());
+
+    yield(); // Feed watchdog after display update
   }
 }
 
@@ -245,7 +300,7 @@ void handleButton()
   static bool buttonState = HIGH;
   static bool lastReading = HIGH;
   static bool initialized = false;
-  
+
   bool reading = digitalRead(button_pin);
 
   // Initialize button state on first call to avoid false trigger
@@ -271,7 +326,7 @@ void handleButton()
     // If the reading is stable and different from current state
     if (reading != buttonState)
     {
-      buttonState = reading;      
+      buttonState = reading;
       // Detect button press (transition to LOW with INPUT_PULLUP)
       if (buttonState == LOW)
       {
@@ -298,8 +353,25 @@ void u8g2_prepare(void)
 // Temperature reading #1
 float readTempSensor1(void)
 {
+  // Check if sensor is connected
+  if (sensors.getDeviceCount() == 0)
+  {
+    Serial.println(F("Warning: No temperature sensor detected"));
+    return 25.0; // Return default room temperature
+  }
+
   sensors.requestTemperatures();
-  return sensors.getTempCByIndex(0);
+  yield(); // Feed the watchdog
+  float temp = sensors.getTempCByIndex(0);
+
+  // Check for invalid reading
+  if (temp == DEVICE_DISCONNECTED_C || temp == 85.0)
+  {
+    Serial.println(F("Warning: Invalid temperature reading"));
+    return 25.0;
+  }
+
+  return temp;
 }
 
 // pH sensor calibration and reading
@@ -315,10 +387,6 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
 float readPhSensor()
 {
   float vMedio = phSensorAvgVoltage();
-  Serial.print(F("phV: "));
-  Serial.print(vMedio);
-  Serial.print(F(" - "));
-
   float phCalculado;
 
   if (vMedio >= V_NEUTRO)
@@ -330,6 +398,7 @@ float readPhSensor()
     phCalculado = mapFloat(vMedio, V_NEUTRO, V_BASICO, 7.0, 8.2);
   }
 
+  // Roughly calibration for temperature effect
   phCalculado = phCalculado + ((25.0 - temp1) * 0.03);
 
   return phCalculado;
@@ -344,6 +413,12 @@ float phSensorAvgVoltage(void)
   {
     somaTensao += analogRead(PH_SENSOR_BUS) * (5.0 / 1023.0);
     delay(5);
+
+    // Feed watchdog every 10 samples to prevent reset
+    if (i % 10 == 0)
+    {
+      yield();
+    }
   }
 
   return somaTensao / (float)numAmostras;
@@ -545,5 +620,92 @@ void drawFish()
       u8g2.drawLine(tailBaseX, fishY, tailEndX, tailBottom);
       u8g2.drawPixel(fishX + (2 * dir), fishY - 1);
     }
+  }
+}
+
+// Connect to WiFi
+void connectWiFi()
+{
+  Serial.println();
+  Serial.print(F("Connecting to WiFi: "));
+  Serial.println(ssid);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20)
+  {
+    delay(500);
+    Serial.print(".");
+    yield(); // Feed watchdog during WiFi connection
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    Serial.println();
+    Serial.println(F("WiFi connected!"));
+    Serial.print(F("IP address: "));
+    Serial.println(WiFi.localIP());
+  }
+  else
+  {
+    Serial.println();
+    Serial.println(F("WiFi connection failed!"));
+  }
+}
+
+// Send temperature and pH data to API
+void sendDataToAPI(float temperature, float phValue)
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    WiFiClient client;
+    HTTPClient http;
+
+    Serial.println(F("Sending data to API..."));
+
+    // Prepare JSON payload
+    String jsonPayload = "{";
+    jsonPayload += "\"temperature\":";
+    jsonPayload += String(temperature, 2);
+    jsonPayload += ",\"ph\":";
+    jsonPayload += String(phValue, 2);
+    jsonPayload += ",\"timestamp\":";
+    jsonPayload += String(millis());
+    jsonPayload += "}";
+
+    Serial.print(F("Payload: "));
+    Serial.println(jsonPayload);
+
+    http.begin(client, apiEndpoint);
+    yield(); // Feed watchdog before HTTP operation
+    
+    http.addHeader("Content-Type", "application/json");
+    http.setAuthorization(apiUsername, apiPassword);
+
+    int httpResponseCode = http.POST(jsonPayload);
+    yield(); // Feed watchdog after HTTP operation
+
+    if (httpResponseCode > 0)
+    {
+      Serial.print(F("HTTP Response code: "));
+      Serial.println(httpResponseCode);
+      String response = http.getString();
+      Serial.print(F("Response: "));
+      Serial.println(response);
+    }
+    else
+    {
+      Serial.print(F("Error code: "));
+      Serial.println(httpResponseCode);
+    }
+
+    http.end();
+  }
+  else
+  {
+    Serial.println(F("WiFi not connected - skipping API call"));
   }
 }
