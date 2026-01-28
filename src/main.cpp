@@ -86,7 +86,6 @@ void initFish(void);
 void updateFish(void);
 void drawFish(void);
 void drawPlants(void);
-int getTime(void);
 void u8g2_prepare(void);
 void handleButton(void);
 
@@ -547,10 +546,4 @@ void drawFish()
       u8g2.drawPixel(fishX + (2 * dir), fishY - 1);
     }
   }
-}
-
-int getTime(void)
-{
-  rtcDateTime = rtc.getDateTime();
-  return rtcDateTime.hour * 100 + rtcDateTime.minute;
 }
