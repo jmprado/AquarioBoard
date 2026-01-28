@@ -66,13 +66,13 @@ struct Fish
 Fish fishes[MAX_FISH];
 
 // Pin definitions
-const uint8_t relay_1_bus = 2;
-const uint8_t relay_2_bus = 3;
+const uint8_t relay_1_bus = 7;
+const uint8_t relay_2_bus = 6;
 const uint8_t button_pin = 4;
 
 // Relay override state
 bool relay1Override = false;
-bool lastButtonState = HIGH;
+bool lastRelay1State = LOW;
 unsigned long lastDebounceTime = 0;
 const unsigned long debounceDelay = 50;
 
@@ -86,7 +86,6 @@ void initFish(void);
 void updateFish(void);
 void drawFish(void);
 void drawPlants(void);
-void printDate(void);
 int getTime(void);
 void u8g2_prepare(void);
 void handleButton(void);
@@ -112,6 +111,10 @@ void setup()
   u8g2.begin();
   rtc.begin();
 
+  // Set RTC time - UNCOMMENT AND MODIFY THIS LINE TO SET THE CORRECT TIME
+  // rtc.setDateTime(__DATE__, __TIME__);
+  // After setting the time once, comment it out again and re-upload
+
   // Initialize animations after hardware
   initBubbles();
   initFish();
@@ -131,22 +134,45 @@ void loop()
   // Handle button press for override
   handleButton();
 
-  // Get current time and control relay_1 (10:00 to 18:00)
+  // Get current time and control relay_1 (10:00 AM to 6:00 PM)
   rtcDateTime = rtc.getDateTime();
+  
   int currentTime = rtcDateTime.hour * 100 + rtcDateTime.minute;
-
-  // Apply override or time-based control
+  
+  // Determine desired relay state
+  bool desiredRelay1State;
   if (relay1Override)
   {
-    digitalWrite(relay_1_bus, HIGH);
-  }
-  else if (currentTime >= 1000 && currentTime < 1800)
-  {
-    digitalWrite(relay_1_bus, HIGH);
+    // Override active: turn relay ON regardless of schedule
+    desiredRelay1State = HIGH;
   }
   else
   {
-    digitalWrite(relay_1_bus, LOW);
+    // No override: follow scheduled time (ON from 10:00 to 18:00)
+    if (currentTime >= 1000 && currentTime < 1800)
+    {
+      desiredRelay1State = HIGH;
+    }
+    else
+    {
+      desiredRelay1State = LOW;
+    }
+  }
+  
+  // Only update relay if state changed
+  if (desiredRelay1State != lastRelay1State)
+  {
+    digitalWrite(relay_1_bus, desiredRelay1State);
+    lastRelay1State = desiredRelay1State;
+    
+    Serial.print(F("Relay 1: "));
+    Serial.print(desiredRelay1State == HIGH ? F("ON") : F("OFF"));
+    Serial.print(F(" ["));
+    Serial.print(relay1Override ? F("Override") : F("Scheduled"));
+    Serial.print(F("] Time: "));
+    Serial.print(rtcDateTime.hour);
+    Serial.print(F(":"));
+    Serial.println(rtcDateTime.minute);
   }
 
   // Update sensor readings every 10 seconds
@@ -161,7 +187,6 @@ void loop()
     Serial.print(temp1);
     Serial.print(F(" - pH: "));
     Serial.println(ph);
-    printDate();
 
     if (relay1Override)
     {
@@ -218,25 +243,47 @@ void loop()
 // Handle button press with debouncing
 void handleButton()
 {
+  static bool buttonState = HIGH;
+  static bool lastReading = HIGH;
+  static bool initialized = false;
+  
   bool reading = digitalRead(button_pin);
 
-  if (reading != lastButtonState)
+  // Initialize button state on first call to avoid false trigger
+  if (!initialized)
+  {
+    buttonState = reading;
+    lastReading = reading;
+    initialized = true;
+    lastDebounceTime = millis();
+    return;
+  }
+
+  // Reset debounce timer when reading changes
+  if (reading != lastReading)
   {
     lastDebounceTime = millis();
+    lastReading = reading;
   }
 
+  // Check if enough time has passed since last change
   if ((millis() - lastDebounceTime) > debounceDelay)
   {
-    if (reading == LOW && lastButtonState == HIGH)
+    // If the reading is stable and different from current state
+    if (reading != buttonState)
     {
-      relay1Override = !relay1Override;
+      buttonState = reading;      
+      // Detect button press (transition to LOW with INPUT_PULLUP)
+      if (buttonState == LOW)
+      {
+        relay1Override = !relay1Override;
 
-      Serial.print(F("Relay Override: "));
-      Serial.println(relay1Override ? F("ON") : F("OFF"));
+        Serial.println(F("=== Override Toggled ==="));
+        Serial.print(F("  Mode: "));
+        Serial.println(relay1Override ? F("OVERRIDE ON") : F("SCHEDULED"));
+      }
     }
   }
-
-  lastButtonState = reading;
 }
 
 // LCD start up
@@ -500,23 +547,6 @@ void drawFish()
       u8g2.drawPixel(fishX + (2 * dir), fishY - 1);
     }
   }
-}
-
-void printDate(void)
-{
-  rtcDateTime = rtc.getDateTime();
-  Serial.print(rtcDateTime.year);
-  Serial.print(F("-"));
-  Serial.print(rtcDateTime.month);
-  Serial.print(F("-"));
-  Serial.print(rtcDateTime.day);
-  Serial.print(F(" "));
-  Serial.print(rtcDateTime.hour);
-  Serial.print(F(":"));
-  Serial.print(rtcDateTime.minute);
-  Serial.print(F(":"));
-  Serial.print(rtcDateTime.second);
-  Serial.println();
 }
 
 int getTime(void)
