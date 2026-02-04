@@ -1,7 +1,14 @@
-// WiFi and HTTP libraries for ESP8266
+// WiFi and HTTP libraries
+#if defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
+#elif defined(ARDUINO_ARCH_AVR)
+#include <SoftwareSerial.h>
+#include <WiFiEspAT.h>
+#include <ArduinoHttpClient.h>
+#include <Base64.h>
+#endif
 
 // RTC DS3231 Lib
 #include <DS3231.h>
@@ -38,6 +45,20 @@ const char degreeSymbol[] = "\xB0";
 const char *ssid = "Pereira Prado";                              // Replace with your WiFi SSID
 const char *password = "jupeva98";                               // Replace with your WiFi password
 const char *apiEndpoint = "http://YOUR_SERVER_IP/getAquaValues"; // Replace with your API endpoint
+
+#if defined(ARDUINO_ARCH_AVR)
+// ESP-01 (AT firmware) serial wiring (UNO):
+// UNO TX (ESP01_TX_PIN) -> ESP-01 RX (level shifted), UNO RX (ESP01_RX_PIN) <- ESP-01 TX
+const uint8_t ESP01_RX_PIN = 3;
+const uint8_t ESP01_TX_PIN = 5;
+const unsigned long ESP01_BAUD = 9600; // Set to your ESP-01 AT firmware baud
+SoftwareSerial espSerial(ESP01_RX_PIN, ESP01_TX_PIN);
+
+// API host/path for HTTPClient (use same values as apiEndpoint above)
+const char *apiHost = "YOUR_SERVER_IP";
+const uint16_t apiPort = 80;
+const char *apiPath = "/getAquaValues";
+#endif
 
 // API authentication
 const char *apiUsername = "YOUR_API_USERNAME"; // Replace with your API username
@@ -124,7 +145,11 @@ void setup()
   digitalWrite(relay_1_bus, LOW);
   digitalWrite(relay_2_bus, LOW);
 
+#if defined(ESP8266)
   randomSeed(ESP.getCycleCount());
+#else
+  randomSeed(analogRead(A1));
+#endif
 
   sensors.begin();
   Serial.print(F("Temperature sensors found: "));
@@ -135,6 +160,15 @@ void setup()
   yield(); // Feed watchdog after SPI communication
 
   rtc.begin();
+
+#if defined(ARDUINO_ARCH_AVR)
+  espSerial.begin(ESP01_BAUD);
+  WiFi.init(espSerial);
+  if (WiFi.status() == WL_NO_MODULE)
+  {
+    Serial.println(F("ESP-01 not detected"));
+  }
+#endif
 
   // Connect to WiFi
   connectWiFi();
@@ -630,6 +664,7 @@ void connectWiFi()
   Serial.print(F("Connecting to WiFi: "));
   Serial.println(ssid);
 
+#if defined(ESP8266)
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
 
@@ -654,11 +689,36 @@ void connectWiFi()
     Serial.println();
     Serial.println(F("WiFi connection failed!"));
   }
+#elif defined(ARDUINO_ARCH_AVR)
+  int status = WL_IDLE_STATUS;
+  int attempts = 0;
+  while (status != WL_CONNECTED && attempts < 20)
+  {
+    status = WiFi.begin(ssid, password);
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+
+  if (status == WL_CONNECTED)
+  {
+    Serial.println();
+    Serial.println(F("WiFi connected!"));
+    Serial.print(F("IP address: "));
+    Serial.println(WiFi.localIP());
+  }
+  else
+  {
+    Serial.println();
+    Serial.println(F("WiFi connection failed!"));
+  }
+#endif
 }
 
 // Send temperature and pH data to API
 void sendDataToAPI(float temperature, float phValue)
 {
+#if defined(ESP8266)
   if (WiFi.status() == WL_CONNECTED)
   {
     WiFiClient client;
@@ -708,4 +768,66 @@ void sendDataToAPI(float temperature, float phValue)
   {
     Serial.println(F("WiFi not connected - skipping API call"));
   }
+#elif defined(ARDUINO_ARCH_AVR)
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    WiFiClient client;
+    HttpClient http(client, apiHost, apiPort);
+
+    Serial.println(F("Sending data to API..."));
+
+    // Prepare JSON payload
+    String jsonPayload = "{";
+    jsonPayload += "\"temperature\":";
+    jsonPayload += String(temperature, 2);
+    jsonPayload += ",\"ph\":";
+    jsonPayload += String(phValue, 2);
+    jsonPayload += ",\"timestamp\":";
+    jsonPayload += String(millis());
+    jsonPayload += "}";
+
+    Serial.print(F("Payload: "));
+    Serial.println(jsonPayload);
+
+    char authRaw[64];
+    snprintf(authRaw, sizeof(authRaw), "%s:%s", apiUsername, apiPassword);
+    int encodedLen = base64_enc_len(strlen(authRaw));
+    char encoded[encodedLen + 1];
+    base64_encode(encoded, authRaw, strlen(authRaw));
+    encoded[encodedLen] = '\0';
+
+    String authHeader = String("Basic ") + encoded;
+
+    http.beginRequest();
+    http.post(apiPath);
+    http.sendHeader("Content-Type", "application/json");
+    http.sendHeader("Content-Length", jsonPayload.length());
+    http.sendHeader("Authorization", authHeader);
+    http.beginBody();
+    http.print(jsonPayload);
+    http.endRequest();
+
+    int httpResponseCode = http.responseStatusCode();
+    String response = http.responseBody();
+
+    if (httpResponseCode > 0)
+    {
+      Serial.print(F("HTTP Response code: "));
+      Serial.println(httpResponseCode);
+      Serial.print(F("Response: "));
+      Serial.println(response);
+    }
+    else
+    {
+      Serial.print(F("Error code: "));
+      Serial.println(httpResponseCode);
+    }
+
+    http.stop();
+  }
+  else
+  {
+    Serial.println(F("WiFi not connected - skipping API call"));
+  }
+#endif
 }
