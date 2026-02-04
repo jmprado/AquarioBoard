@@ -44,3 +44,6 @@ libraries by scanning project source files.
 
 More information about PlatformIO Library Dependency Finder
 - https://docs.platformio.org/page/librarymanager/ldf.html
+
+Note:
+- This project vendors Arduino-DS3231 in lib/Arduino-DS3231 to keep local warning fixes.

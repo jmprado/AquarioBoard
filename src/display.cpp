@@ -1,0 +1,262 @@
+#include "display.h"
+
+#include <Arduino.h>
+#include <U8g2lib.h>
+
+#ifdef U8X8_HAVE_HW_SPI
+#include <SPI.h>
+#endif
+#ifdef U8X8_HAVE_HW_I2C
+#include <Wire.h>
+#endif
+
+#include "config.h"
+
+const char labelTemp[] = "Temp:";
+const char labelPh[] = "pH:";
+const char degreeSymbol[] = "\xB0";
+
+static U8G2_ST7920_128X64_1_SW_SPI u8g2(U8G2_R0, /* clock=*/13, /* data=*/11, /* CS=*/12, /* reset=*/8);
+
+struct Bubble
+{
+  float x;
+  float y;
+  float speed;
+  uint8_t radius;
+};
+
+struct Fish
+{
+  float x;
+  float y;
+  float speed;
+  int8_t direction;
+  float swimOffset;
+};
+
+static Bubble bubbles[MAX_BUBBLES];
+static Fish fishes[MAX_FISH];
+
+static void u8g2_prepare();
+static void drawBubbles();
+static void drawPlants();
+static void drawFish();
+
+void initDisplay()
+{
+  u8g2.begin();
+}
+
+void initAnimations()
+{
+  for (uint8_t i = 0; i < MAX_BUBBLES; i++)
+  {
+    bubbles[i].x = random(100, 120);
+    bubbles[i].y = SCREEN_HEIGHT + random(0, 20);
+    bubbles[i].speed = random(5, 15) / 10.0;
+    bubbles[i].radius = random(1, 4);
+  }
+
+  fishes[0].x = random(-20, 0);
+  fishes[0].y = 28;
+  fishes[0].speed = 0.4;
+  fishes[0].direction = 1;
+  fishes[0].swimOffset = 0;
+
+  fishes[1].x = random(SCREEN_WIDTH, SCREEN_WIDTH + 20);
+  fishes[1].y = 42;
+  fishes[1].speed = 0.3;
+  fishes[1].direction = -1;
+  fishes[1].swimOffset = 0;
+}
+
+void updateAnimations()
+{
+  for (uint8_t i = 0; i < MAX_BUBBLES; i++)
+  {
+    bubbles[i].y -= bubbles[i].speed;
+    bubbles[i].x += sin(bubbles[i].y / 10.0) * 0.3;
+
+    if (bubbles[i].y < -bubbles[i].radius)
+    {
+      bubbles[i].y = SCREEN_HEIGHT + random(0, 20);
+      bubbles[i].x = random(100, 120);
+      bubbles[i].speed = random(5, 15) / 10.0;
+      bubbles[i].radius = random(1, 4);
+    }
+
+    if (bubbles[i].x < 0)
+      bubbles[i].x = 0;
+    if (bubbles[i].x > SCREEN_WIDTH)
+      bubbles[i].x = SCREEN_WIDTH;
+  }
+
+  for (uint8_t i = 0; i < MAX_FISH; i++)
+  {
+    fishes[i].x += fishes[i].speed * fishes[i].direction;
+    fishes[i].y += sin(fishes[i].x / 15.0) * 0.15;
+    fishes[i].swimOffset += 0.3;
+
+    if (fishes[i].direction > 0 && fishes[i].x > SCREEN_WIDTH + 20)
+    {
+      fishes[i].x = -20;
+      fishes[i].y = random(20, 50);
+      fishes[i].speed = random(2, 6) / 10.0;
+    }
+    else if (fishes[i].direction < 0 && fishes[i].x < -20)
+    {
+      fishes[i].x = SCREEN_WIDTH + 20;
+      fishes[i].y = random(20, 50);
+      fishes[i].speed = random(2, 6) / 10.0;
+    }
+
+    if (fishes[i].y < 20)
+      fishes[i].y = 20;
+    if (fishes[i].y > 50)
+      fishes[i].y = 50;
+  }
+}
+
+void drawScreen(float tempC, float ph, bool relay1Override)
+{
+  char buffer_temp[8];
+  char buffer_ph[8];
+  dtostrf(tempC, 4, 1, buffer_temp);
+  dtostrf(ph, 4, 1, buffer_ph);
+  strcat(buffer_temp, degreeSymbol);
+
+  u8g2_prepare();
+  u8g2.firstPage();
+  do
+  {
+    drawPlants();
+    drawBubbles();
+    drawFish();
+
+    u8g2.drawStr(0, 0, labelTemp);
+    u8g2.drawStr(32, 0, buffer_temp);
+    u8g2.drawStr(0, 12, labelPh);
+    u8g2.drawStr(14, 12, buffer_ph);
+
+    if (relay1Override)
+    {
+      u8g2.drawStr(90, 0, "[OVR]");
+    }
+  } while (u8g2.nextPage());
+}
+
+static void u8g2_prepare()
+{
+  u8g2.setFont(u8g2_font_spleen6x12_mf);
+  u8g2.setFontRefHeightExtendedText();
+  u8g2.setDrawColor(1);
+  u8g2.setFontPosTop();
+  u8g2.setFontDirection(0);
+}
+
+static void drawBubbles()
+{
+  for (uint8_t i = 0; i < MAX_BUBBLES; i++)
+  {
+    if (bubbles[i].y >= 0 && bubbles[i].y < SCREEN_HEIGHT)
+    {
+      u8g2.drawCircle((int)bubbles[i].x, (int)bubbles[i].y, bubbles[i].radius);
+
+      if (bubbles[i].radius > 1)
+      {
+        u8g2.drawPixel((int)bubbles[i].x - 1, (int)bubbles[i].y - 1);
+      }
+    }
+  }
+}
+
+static void drawPlants()
+{
+  static unsigned long lastMillis = 0;
+  static float timeOffset = 0;
+
+  unsigned long currentMillis = millis();
+  if (currentMillis != lastMillis)
+  {
+    lastMillis = currentMillis;
+    timeOffset = currentMillis / 1000.0;
+  }
+
+  int sway1 = (int)(sin(timeOffset * 1.5) * 2);
+  int sway2 = (int)(sin(timeOffset * 2.0) * 3);
+  int sway3 = (int)(sin(timeOffset * 1.8 + 1) * 2);
+  int sway4 = (int)(sin(timeOffset * 2.5) * 1);
+
+  const int plant1X = 10;
+  const int plant1BaseY = SCREEN_HEIGHT - 1;
+  for (uint8_t i = 0; i < 3; i++)
+  {
+    int offsetX = plant1X + (i * 3);
+    u8g2.drawLine(offsetX, plant1BaseY, offsetX - 2 + sway1, plant1BaseY - 15);
+    u8g2.drawLine(offsetX, plant1BaseY, offsetX + 2 + sway1, plant1BaseY - 12);
+  }
+
+  const int plant2X = 35;
+  const int plant2BaseY = SCREEN_HEIGHT - 1;
+  u8g2.drawLine(plant2X, plant2BaseY, plant2X + (sway2 / 2), plant2BaseY - 18);
+  u8g2.drawLine(plant2X, plant2BaseY - 10, plant2X - 5 + sway2, plant2BaseY - 15);
+  u8g2.drawLine(plant2X, plant2BaseY - 10, plant2X + 5 + sway2, plant2BaseY - 15);
+  u8g2.drawLine(plant2X, plant2BaseY - 5, plant2X - 4 + (sway2 / 2), plant2BaseY - 8);
+  u8g2.drawLine(plant2X, plant2BaseY - 5, plant2X + 4 + (sway2 / 2), plant2BaseY - 8);
+
+  const int plant3X = 75;
+  const int plant3BaseY = SCREEN_HEIGHT - 1;
+  for (uint8_t i = 0; i < 2; i++)
+  {
+    int offsetX = plant3X + (i * 4);
+    u8g2.drawLine(offsetX, plant3BaseY, offsetX - 1 + sway3, plant3BaseY - 8);
+    u8g2.drawLine(offsetX - 1 + sway3, plant3BaseY - 8, offsetX + 1 + sway3 * 2, plant3BaseY - 14);
+    u8g2.drawLine(offsetX + 1 + sway3 * 2, plant3BaseY - 14, offsetX + sway3 * 2, plant3BaseY - 20);
+  }
+
+  const int plant4X = 105;
+  const int plant4BaseY = SCREEN_HEIGHT - 1;
+  for (uint8_t i = 0; i < 4; i++)
+  {
+    int offsetX = plant4X + (i * 2);
+    u8g2.drawLine(offsetX, plant4BaseY, offsetX + (i % 2 ? -1 : 1) + sway4, plant4BaseY - 10);
+  }
+
+  u8g2.drawCircle(25, SCREEN_HEIGHT - 2, 2);
+  u8g2.drawCircle(55, SCREEN_HEIGHT - 3, 3);
+  u8g2.drawCircle(95, SCREEN_HEIGHT - 2, 2);
+  u8g2.drawCircle(118, SCREEN_HEIGHT - 3, 2);
+}
+
+static void drawFish()
+{
+  for (uint8_t i = 0; i < MAX_FISH; i++)
+  {
+    int fishX = (int)fishes[i].x;
+    int fishY = (int)fishes[i].y;
+    int8_t dir = fishes[i].direction;
+
+    int tailBaseX = fishX - (3 * dir);
+    int tailEndX = fishX - (6 * dir);
+    int tailWag = (int)(sin(fishes[i].swimOffset) * 2);
+    int tailTop = fishY - 2 + tailWag;
+    int tailBottom = fishY + 2 + tailWag;
+
+    int leftmost = (dir > 0) ? tailEndX : fishX - 3;
+    int rightmost = (dir > 0) ? fishX + 4 : tailEndX;
+
+    if (leftmost >= 0 && rightmost < SCREEN_WIDTH &&
+        fishY >= 3 && fishY < SCREEN_HEIGHT - 3 &&
+        tailTop >= 0 && tailTop < SCREEN_HEIGHT &&
+        tailBottom >= 0 && tailBottom < SCREEN_HEIGHT)
+    {
+      u8g2.drawCircle(fishX, fishY, 3);
+      u8g2.drawCircle(fishX + dir, fishY, 3);
+      u8g2.drawPixel(fishX, fishY);
+      u8g2.drawLine(tailBaseX, fishY, tailEndX, tailTop);
+      u8g2.drawLine(tailBaseX, fishY, tailEndX, tailBottom);
+      u8g2.drawPixel(fishX + (2 * dir), fishY - 1);
+    }
+  }
+}
