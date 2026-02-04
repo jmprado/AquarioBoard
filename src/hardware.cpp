@@ -24,6 +24,7 @@ void setupHardware()
 void initRtc()
 {
   rtc.begin();
+  // Set RTC time - UNCOMMENT AND MODIFY THIS LINE TO SET THE CORRECT TIME
   // rtc.setDateTime(__DATE__, __TIME__);
 }
 

@@ -17,11 +17,7 @@ void setup()
   initSensors();
   initDisplay();
   initRtc();
-
-  // Set RTC time - UNCOMMENT AND MODIFY THIS LINE TO SET THE CORRECT TIME
-  // rtc.setDateTime(__DATE__, __TIME__);
-  // After setting the time once, comment it out again and re-upload
-
+  
   // Initialize animations after hardware
   initAnimations();
 
