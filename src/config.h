@@ -20,14 +20,11 @@ const unsigned long BUBBLE_UPDATE_INTERVAL = 100;   // 100ms for bubble animatio
 #define MAX_FISH 2
 
 // Pin definitions
-const uint8_t relay_1_bus = 7;
-const uint8_t relay_2_bus = 6;
-const uint8_t button_pin = 4;
-const uint8_t temp_sensor_1_bus = 2;
+const uint8_t temp_sensor_1_bus = 12;
 
 // pH sensor calibration and reading
 #define PH_SENSOR_BUS A0
 
-const float V_ACIDO = 3.75;
-const float V_NEUTRO = 3.25;
-const float V_BASICO = 2.80;
+const float V_ACIDO = 3.76;
+const float V_NEUTRO = 3.26;
+const float V_BASICO = 3.10;

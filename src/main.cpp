@@ -1,10 +1,13 @@
 #include "config.h"
 #include "display.h"
-#include "hardware.h"
 #include "sensors.h"
 
 unsigned long lastSensorUpdate = 0;
 unsigned long lastBubbleUpdate = 0;
+
+// Global variables for sensor values
+float temp1 = 0.0;
+float ph = 0.0;
 
 void setup()
 {
@@ -13,32 +16,19 @@ void setup()
   {
   }
 
-  setupHardware();
   initSensors();
   initDisplay();
-  initRtc();
-  
-  // Initialize animations after hardware
+
+  // Initialize animations after display
   initAnimations();
 
   delay(100);
 }
 
-// Global variables for sensor values
-float temp1 = 0.0;
-float ph = 0.0;
-
 void loop()
 {
   unsigned long currentMillis = millis();
   bool needsRedraw = false;
-
-  // Handle button press for override
-  handleButton();
-
-  // Get current time and control relay_1 (10:00 AM to 6:00 PM)
-  RTCDateTime rtcDateTime = getRtcDateTime();
-  updateRelay1(rtcDateTime);
 
   // Update sensor readings every 10 seconds
   if (currentMillis - lastSensorUpdate >= SENSOR_UPDATE_INTERVAL)
@@ -53,11 +43,6 @@ void loop()
     Serial.print(F(" - pH: "));
     Serial.println(ph);
 
-    if (relay1Override)
-    {
-      Serial.println(F("LIGHTS ON"));
-    }
-
     needsRedraw = true;
   }
 
@@ -69,9 +54,8 @@ void loop()
     needsRedraw = true;
   }
 
-  // Only redraw screen when something changed
   if (needsRedraw)
   {
-    drawScreen(temp1, ph, relay1Override);
+    drawScreen(temp1, ph);
   }
 }

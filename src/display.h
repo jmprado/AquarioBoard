@@ -3,4 +3,4 @@
 void initDisplay();
 void initAnimations();
 void updateAnimations();
-void drawScreen(float tempC, float ph, bool relay1Override);
+void drawScreen(float tempC, float ph);
