@@ -3,4 +3,4 @@
 void initDisplay();
 void initAnimations();
 void updateAnimations();
-void drawScreen(float tempC, float ph);
+void drawScreen(float tempC);

@@ -25,6 +25,9 @@ const uint8_t temp_sensor_1_bus = 12;
 // pH sensor calibration and reading
 #define PH_SENSOR_BUS A0
 
-const float V_ACIDO = 3.76;
-const float V_NEUTRO = 3.26;
-const float V_BASICO = 3.10;
+
+// Insira o valor das suas leituras de calibração aqui (em volts)
+// Use soluções tampão de pH 4, 7 e 10 para obter os valores corretos
+const float V_ACIDO = 3.5889;
+const float V_NEUTRO = 3.1847;
+const float V_BASICO = 2.7187;

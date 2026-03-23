@@ -2,12 +2,13 @@
 #include "display.h"
 #include "sensors.h"
 
+#include <math.h>
+
 unsigned long lastSensorUpdate = 0;
 unsigned long lastBubbleUpdate = 0;
 
 // Global variables for sensor values
-float temp1 = 0.0;
-float ph = 0.0;
+float temp1 = NAN;
 
 void setup()
 {
@@ -36,12 +37,16 @@ void loop()
     lastSensorUpdate = currentMillis;
 
     temp1 = readTempSensor1();
-    ph = readPhSensor(temp1);
 
     Serial.print(F("Temp: "));
-    Serial.print(temp1);
-    Serial.print(F(" - pH: "));
-    Serial.println(ph);
+    if (isnan(temp1))
+    {
+      Serial.println(F("--.-"));
+    }
+    else
+    {
+      Serial.println(temp1);
+    }
 
     needsRedraw = true;
   }
@@ -56,6 +61,6 @@ void loop()
 
   if (needsRedraw)
   {
-    drawScreen(temp1, ph);
+    drawScreen(temp1);
   }
 }
