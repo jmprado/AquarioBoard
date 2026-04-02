@@ -3,7 +3,6 @@
 #include "sensors.h"
 
 unsigned long lastSensorUpdate = 0;
-unsigned long lastBubbleUpdate = 0;
 
 // Global variables for sensor values
 float temp1 = 0.0;
@@ -18,9 +17,6 @@ void setup()
 
   initSensors();
   initDisplay();
-
-  // Initialize animations after display
-  initAnimations();
 
   delay(100);
 }
@@ -43,14 +39,6 @@ void loop()
     Serial.print(F(" - pH: "));
     Serial.println(ph);
 
-    needsRedraw = true;
-  }
-
-  // Update animations every 100ms
-  if (currentMillis - lastBubbleUpdate >= BUBBLE_UPDATE_INTERVAL)
-  {
-    lastBubbleUpdate = currentMillis;
-    updateAnimations();
     needsRedraw = true;
   }
 

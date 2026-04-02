@@ -29,14 +29,6 @@ void initDisplay()
   u8g2.begin();
 }
 
-void initAnimations()
-{
-}
-
-void updateAnimations()
-{
-}
-
 void drawScreen(float tempC, float ph)
 {
   u8g2_prepare();

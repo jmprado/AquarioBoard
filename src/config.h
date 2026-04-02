@@ -9,16 +9,12 @@ extern const char degreeSymbol[];
 
 // Timing settings
 const unsigned long SENSOR_UPDATE_INTERVAL = 10000; // 10 seconds for sensor readings
-const unsigned long BUBBLE_UPDATE_INTERVAL = 100;   // 100ms for bubble animation
 
 // Display settings
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 
 // Animation settings
-#define MAX_BUBBLES 6
-#define MAX_FISH 2
-
 // Pin definitions
 const uint8_t temp_sensor_1_bus = 12; // DS18B20 temperature sensor bus pin 
 
