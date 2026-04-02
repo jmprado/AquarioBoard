@@ -14,17 +14,45 @@ static bool hasLastValidPh = false;
 static float lastValidPh = 7.0;
 
 static float phSensorAvgVoltage();
-static float mapFloat(float x, float in_min, float in_max, float out_min, float out_max);
 
 void initSensors()
 {
   sensors.begin();
+
+  const uint8_t count = sensors.getDeviceCount();
+  Serial.print(F("DS18B20 devices: "));
+  Serial.println(count);
+
+  if (count == 0)
+  {
+    Serial.println(F("DS18B20 not found on bus"));
+    return;
+  }
+
+  DeviceAddress addr;
+  if (!sensors.getAddress(addr, 0))
+  {
+    Serial.println(F("DS18B20 found but failed to read address"));
+    return;
+  }
+
+  Serial.print(F("DS18B20 resolution: "));
+  Serial.print(sensors.getResolution(addr));
+  Serial.println(F(" bits"));
 }
 
 float readTempSensor1()
 {
   sensors.requestTemperatures();
-  return sensors.getTempCByIndex(0);
+  const float tempC = sensors.getTempCByIndex(0);
+
+  if (tempC == DEVICE_DISCONNECTED_C || tempC <= -126.0f)
+  {
+    Serial.println(F("DS18B20 read failed (disconnected or wiring issue)"));
+    return NAN;
+  }
+
+  return tempC;
 }
 
 float readPhSensor(float tempC)
@@ -53,11 +81,17 @@ float readPhSensor(float tempC)
 
   if (vMedio >= V_NEUTRO)
   {
-    phCalculado = mapFloat(vMedio, V_ACIDO, V_NEUTRO, 2.6, 7.0);
+    // Acid side: interpolate between pH 7 and pH 4 calibration points.
+    const float slope74 = (4.0f - 7.0f) / (V_ACIDO - V_NEUTRO);
+    const float offset74 = 7.0f - (slope74 * V_NEUTRO);
+    phCalculado = (slope74 * vMedio) + offset74;
   }
   else
   {
-    phCalculado = mapFloat(vMedio, V_NEUTRO, V_BASICO, 7.0, 8.2);
+    // Basic side: interpolate between pH 7 and pH 10 calibration points.
+    const float slope710 = (10.0f - 7.0f) / (V_BASICO - V_NEUTRO);
+    const float offset710 = 7.0f - (slope710 * V_NEUTRO);
+    phCalculado = (slope710 * vMedio) + offset710;
   }
 
   if (!isnan(tempC) && tempC > -20.0 && tempC < 80.0)
@@ -88,9 +122,4 @@ static float phSensorAvgVoltage()
   }
 
   return somaTensao / (float)numAmostras;
-}
-
-static float mapFloat(float x, float in_min, float in_max, float out_min, float out_max)
-{
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
